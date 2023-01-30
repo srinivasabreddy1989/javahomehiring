@@ -4,29 +4,37 @@ pipeline {
     stages {
         
         stage('Maven Build') {
-            when {
-                branch 'develop'
-            }
             steps {
                 sh "mvn clean package"
             }
         }
         
-        stage('Tomcat Deploy - Dev') {
-            when {
-                branch 'develop'
-            }
+        stage('Docker Build') {
             steps {
-                echo "Deploying to dev"
+                sh "docker build . -t kammana/hiring:${commit_id()}"
             }
         }
-        stage('Tomcat Deploy - Prod') {
-            when {
-                branch 'main'
-            }
+        stage('Docker Push') {
             steps {
-                echo "Deploying to production"
+                withCredentials([string(credentialsId: 'docker-hub', variable: 'hubPwd')]) {
+                    sh "docker login -u kammana -p ${hubPwd}"
+                    sh "docker push kammana/hiring:${commit_id()}"
+                }
             }
         }
+        stage('Docker Deploy') {
+            steps {
+                sshagent(['docker-host']) {
+                    sh "ssh -o StrictHostKeyChecking=no  ec2-user@172.31.36.37 docker rm -f hiring"
+                    sh "ssh  ec2-user@172.31.36.37 docker run -d -p 8080:8080 --name hiring kammana/hiring:${commit_id()}"
+                }
+            }
+        }
+
     }
+}
+
+def commit_id(){
+    id = sh returnStdout: true, script: 'git rev-parse HEAD'
+    return id
 }
